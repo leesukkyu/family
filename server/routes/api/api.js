@@ -1,7 +1,12 @@
+const HttpRequest = require('request');
+const Nodemailer = require('nodemailer');
+const INI = require('../../common/ini');
+
 var express = require('express');
 var router = express.Router();
 var Pedigree = require('../../models/pedigree');
 var People = require('../../models/people');
+
 
 var _resErrorInterceptor = function (err) {
   if (err) {
@@ -109,11 +114,11 @@ router.all('/create_person_child', function (req, res, next) {
     death_timestamp: rq.death_timestamp,
     job: rq.job,
     tag_list: rq.tag_list,
-    id_parent : parentId,
+    id_parent: parentId,
   }
   People.create(model, function (err, user) {
     var rs = _resErrorInterceptor(err);
-    service.addChildList(parentId, user.id, function(){
+    service.addChildList(parentId, user.id, function () {
       if (rs.isErr) {
         res.json(rs);
       } else {
@@ -135,17 +140,83 @@ router.all('/loadPersons', function (req, res, next) {
     var rs = _resErrorInterceptor(err);
     if (rs.isErr) {
       res.json(rs);
-    } else if(list) {
+    } else if (list) {
       rs.personList = list;
       res.json(rs);
     }
   });
 });
 
+// 메일과 문자 전송
+router.all('/sendInvitation', function (req, res, next) {
+  var rq = req.body.rq;
+  // 문자 발송
+  if (rq.phone) {
+    // todo 나중에 서비스로 빼내야 함 지금은 테스트.
+    var sendMsg = function () {
+      var options = {
+        url: 'https://api-sens.ncloud.com/v1/sms/services/ncp:sms:kr:254889181571:arsco_instagram/messages',
+        headers: {
+          'X-NCP-auth-key': INI['X-NCP-auth-key'],
+          'X-NCP-service-secret': INI['X-NCP-service-secret'],
+          'content-type': 'application/json'
+        },
+        json: {
+          "type": "sms",
+          "contentType": "COMM",
+          "countryCode": "82",
+          "from": "01027842146",
+          "to": [
+            rq.phone
+          ],
+          "content": "안녕하세요. 아래 링크를 통해 족보를 완성하세요. " + req.headers.origin + "/invitation"
+        }
+      };
+      HttpRequest.post(options, function (error, response, body) {
+        console.log(error, response, body);
+      })
+    }
+    try {
+      sendMsg();
+    } catch (error) {
+      console.log(error);
+    }
+  }
+  // 메일 발송
+  if (rq.email) {
+    var transporter = Nodemailer.createTransport({
+      service: 'naver',
+      auth: {
+        user: INI.MAIL_ID,
+        pass: INI.MAIL_PASSWORD
+      }
+    });
+    var mailOptions = {
+      from: INI.MAIL_ID,
+      to: rq.email,
+      subject: '안녕하세요. 족보를 완성해주세요.',
+      text: "안녕하세요. 아래 링크를 통해 족보를 완성하세요. " + req.headers.origin + "/invitation"
+    };
+
+    transporter.sendMail(mailOptions, (error, info) => {
+      if (error) {
+        console.log(error);
+      }
+      else {
+        console.log('Email sent! : ' + info.response);
+      }
+      transporter.close();
+    });
+  }
+  var rs = _resErrorInterceptor(null);
+  res.json(rs);
+});
+
+
 
 var service = {
   // 부모에게 자식 데이터 추가
-  addChildList : function(parentId, childId, callback){
+  addChildList: function (parentId, childId, callback) {
     People.findById(parentId, function (err, doc) {
       if (err) {
         console.log(err);
